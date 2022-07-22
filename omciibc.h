@@ -6,7 +6,7 @@
 #define OMCIIBC_DEF_VID                 0x888
 #define OMCIIBC_DEF_ETHTYPE             0x88e4
 #define OMCIIBC_DEF_PBIT                0x7 
-#define	OMCIIBC_PROC_NAME_ROOT		"OMCIIBC"
+#define	OMCIIBC_PROC_NAME_ROOT		"omciibc"
 #define TX_TIMEOUT		        (6*HZ)
 
 #define OMCIIBC_NETDEV_TX_OK		0	// skb consumed by callee
@@ -43,6 +43,7 @@ static inline char *purename(char *name)
 #endif
 
 struct omciibc_priv {
+	struct net_device	*real_dev;
 	unsigned int debug_rx:2;
 	unsigned int debug_tx:2;
 	struct net_device_stats stats;
@@ -53,5 +54,6 @@ struct omciibc_priv {
 	unsigned long last_tx_packets;
 };
 
+extern int (*omciibc_nat_recv)(struct sk_buff **pskb);
 #endif
 
