@@ -23,6 +23,8 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 
+#include <net/switchdev.h>
+
 #include "omciibc.h"
 
 
@@ -157,6 +159,48 @@ u16 omciibc_packet_pick_tx_queue(struct sk_buff *skb)
 
         return queue_index;
 }
+int omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id,unsigned int enable_chk)
+{
+	struct net_device *dev = skb->dev;
+	struct sk_buff *orig_skb = skb;
+	struct netdev_queue *txq;
+	int ret = NETDEV_TX_BUSY;
+	bool again = false;
+
+	if(enable_chk){
+		if (unlikely(!netif_running(dev) ||
+			     !netif_carrier_ok(dev)))
+			goto drop;
+	}
+
+	skb = validate_xmit_skb_list(skb, dev, &again);
+	if (skb != orig_skb)
+		goto drop;
+
+	skb_set_queue_mapping(skb, queue_id);
+	txq = skb_get_tx_queue(dev, skb);
+
+	local_bh_disable();
+
+	dev_xmit_recursion_inc();
+	HARD_TX_LOCK(dev, txq, smp_processor_id());
+	if (!netif_xmit_frozen_or_drv_stopped(txq)){
+		ret = netdev_start_xmit(skb, dev, txq, false);
+	}
+	HARD_TX_UNLOCK(dev, txq);
+	dev_xmit_recursion_dec();
+
+	local_bh_enable();
+
+	if (!dev_xmit_complete(ret))
+		kfree_skb(skb);
+
+	return ret;
+drop:
+	atomic_long_inc(&dev->tx_dropped);
+	kfree_skb_list(skb);
+	return NET_XMIT_DROP;
+}
 
 int
 omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -203,7 +247,7 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=%02x%02x\n", 
 		//	skb->dev->name, skb, skb->len, priv->stats.tx_packets, jiffies, skb->data[0], skb->data[1]);
 		skb_reset_mac_header(skb);
-		if((ret = dev_direct_xmit(skb,omciibc_packet_pick_tx_queue(skb)))!=NETDEV_TX_OK){
+		if((ret = omciibc_dev_direct_xmit(skb,omciibc_packet_pick_tx_queue(skb),priv->pass_chk))!=NETDEV_TX_OK){
 		priv->stats.tx_dropped++;
 		return OMCIIBC_NETDEV_TX_DROP;
 	}
@@ -218,6 +262,21 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	priv->stats.tx_bytes += skb_len;
 	return OMCIIBC_NETDEV_TX_OK;
 }
+
+int omciibc_dev_state_check(struct net_device *dev)
+{
+	struct omciibc_priv *priv =NULL;
+	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
+
+	if(priv->pass_chk)
+		return -1;
+	
+	if(priv->real_dev == dev)
+		return 0;
+
+	return -1;
+}
+
 int omciibc_handle_frame(struct sk_buff **pskb)
 {
 	struct sk_buff *skb = *pskb;
@@ -429,6 +488,7 @@ omciibc_probe_one(char *omciibc_name, unsigned char *macaddr)
 	memset(priv, 0, sizeof(struct omciibc_priv));	// clear priv
 	priv->debug_tx = 0;
 	priv->debug_rx = 0;
+	priv->pass_chk = 0;
 
 	// add interface to linux
 	if (register_netdev(dev)) {
@@ -471,12 +531,18 @@ __omciibc_cmd_process(char *command)
 		priv->last_rx_bytes = priv->last_tx_bytes = 0;
 		priv->last_rx_packets = priv->last_tx_packets = 0;
 		return 1;
+	} else if (argc == 2 && strcmp(argv[0], "pass_chk") == 0) {
+		int pass_chk = str2val(argv[1]) & 3;
+		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
+		priv->pass_chk = pass_chk;
+		return 1;
 	}
 
 	printk("%s: '%s' cmd error\n", OMCIIBC_PROC_NAME_ROOT, command);
 	printk("syntax:\n"
 		"debug_tx [0..3] (1:enable, 2:pktdump)\n"
-		"debug_rx [0..3] (1:enable, 2:pktdump)\n"		
+		"debug_rx [0..3] (1:enable, 2:pktdump)\n"
+		"pass_chk [0..1] (0:disable, 2:enable)\n"
 		"reset_counter\n"
 	       );
 	return 0;
@@ -500,8 +566,9 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 {
 	struct omciibc_priv *priv = netdev_priv(g_omci_dev);
 
-	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d\n", 
-		priv->real_dev->name,g_omci_dev->name, (g_omci_dev->flags & IFF_UP)?'+':'-', priv->debug_tx, priv->debug_rx);
+	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d, pass_chk=%d\n", 
+		priv->real_dev->name,g_omci_dev->name, (g_omci_dev->flags & IFF_UP)?'+':'-'
+		, priv->debug_tx, priv->debug_rx, priv->pass_chk);
 	seq_printf(seq, "rx byte:%lu pkt:%lu drop:%lu", 
 		priv->stats.rx_bytes, priv->stats.rx_packets, priv->stats.rx_dropped);
 	
@@ -551,6 +618,7 @@ omciibc_cleanup(void)
 {
 	struct omciibc_priv * priv;
 	RCU_INIT_POINTER(omciibc_nat_recv, NULL);
+	RCU_INIT_POINTER(omciibc_port_state_check, NULL);
 	omciibc_proc_cleanup();
 #if 0	
 	rtnl_lock();
@@ -619,6 +687,9 @@ omciibc_init(void)
 	BUG_ON(omciibc_nat_recv);
 	RCU_INIT_POINTER(omciibc_nat_recv, omciibc_handle_frame);
 
+	BUG_ON(omciibc_port_state_check);
+	RCU_INIT_POINTER(omciibc_port_state_check, omciibc_dev_state_check);
+	
 	printk("load %s module\n", OMCIIBC_IFP_NAME_WAN);
 	return 0;
 	

@@ -46,6 +46,7 @@ struct omciibc_priv {
 	struct net_device	*real_dev;
 	unsigned int debug_rx:2;
 	unsigned int debug_tx:2;
+	unsigned int pass_chk:2;
 	struct net_device_stats stats;
 	unsigned long last_rx;		// jiffies, replace the one in dev->last_rx
 	unsigned long last_rx_bytes;	// last_* used for rate calc in /proc/trex_ifomci
@@ -55,5 +56,7 @@ struct omciibc_priv {
 };
 
 extern int (*omciibc_nat_recv)(struct sk_buff **pskb);
+extern int (*omciibc_port_state_check)(struct net_device *dev);
+
 #endif
 
