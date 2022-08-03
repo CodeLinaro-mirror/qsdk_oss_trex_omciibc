@@ -139,6 +139,8 @@ str2val(char *s)
 	}
 	return val;
 }
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+
 u16 omciibc_packet_pick_tx_queue(struct sk_buff *skb)
 {
         struct net_device *dev = skb->dev;
@@ -201,7 +203,54 @@ drop:
 	kfree_skb_list(skb);
 	return NET_XMIT_DROP;
 }
+#else
+u16 omciibc_packet_pick_tx_queue(struct sk_buff *skb)
+{
+	return 0;
+}
+int omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id,unsigned int enable_chk)
+{
+	struct net_device *dev = skb->dev;
+	struct sk_buff *orig_skb = skb;
+	struct netdev_queue *txq;
+	int ret = NETDEV_TX_BUSY;
 
+	if(enable_chk){
+		if (unlikely(!netif_running(dev) ||
+			     !netif_carrier_ok(dev)))
+			goto drop;
+	}
+
+	txq = netdev_pick_tx(dev, skb, NULL);
+
+	skb = validate_xmit_skb_list(skb, dev);
+	if (skb != orig_skb)
+		goto drop;
+		
+	
+	local_bh_disable();
+
+	__this_cpu_inc(xmit_recursion);
+	HARD_TX_LOCK(dev, txq, smp_processor_id());
+	if (!netif_xmit_frozen_or_drv_stopped(txq)){
+		ret = netdev_start_xmit(skb, dev, txq, false);
+	}
+	HARD_TX_UNLOCK(dev, txq);
+	__this_cpu_dec(xmit_recursion);
+
+	local_bh_enable();
+
+	if (!dev_xmit_complete(ret))
+		kfree_skb(skb);
+
+	return ret;
+drop:
+	atomic_long_inc(&dev->tx_dropped);
+	kfree_skb_list(skb);
+	return NET_XMIT_DROP;
+}
+
+#endif
 int
 omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
@@ -315,10 +364,11 @@ int omciibc_handle_frame(struct sk_buff **pskb)
 
 	
 	///is omciibc_ethtype && omciibc_vid
-	
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)	
 	__vlan_hwaccel_clear_tag(skb);
-
-		
+#else
+	skb->vlan_tci = 0;
+#endif		
 	skb->dev = g_omci_dev;
 	
 	
