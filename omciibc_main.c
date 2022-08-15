@@ -43,6 +43,17 @@ MODULE_PARM_DESC(omciibc_ethtype, "ethertype for check ibc");
 static struct net_device *g_omci_dev;
 static struct proc_dir_entry *omciibc_pde;
 
+enum omciibc_state_chk_e {
+	OMCI_CHECK_EVENT_NONE = 0,		// node not replied
+	OMCI_CHECK_EVENT_DOWN_DONE,		// node missing
+	OMCI_CHECK_EVENT_UP_DONE	       	
+};
+enum omciibc_link_state_e {
+	OMCI_LINK_DOWN_EVENT = 0,		// node not replied
+	OMCI_LINK_UP_EVENT,		// node missing
+	OMCI_LINK_NONE_EVENT	       	
+};
+static unsigned int g_omci_check_state = OMCI_CHECK_EVENT_NONE;
 //////////////////////////////////////////////////////////////
 static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
@@ -312,18 +323,59 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return OMCIIBC_NETDEV_TX_OK;
 }
 
-int omciibc_dev_state_check(struct net_device *dev)
+int omciibc_dev_state_check(struct net_device *dev,int updown)
 {
 	struct omciibc_priv *priv =NULL;
+	int ret = 0;	
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 
 	if(priv->pass_chk)
 		return -1;
 	
-	if(priv->real_dev == dev)
-		return 0;
+	if (priv->debug_tx) {
+		printk("omciibc in=%p ,cur=%p, inanme=%s,curname=%s,pass_chk=%d\n",dev,priv->real_dev,dev->name
+			,priv->real_dev->name,priv->pass_chk);
+		printk("omciibc(%s) chk  state=%d-%d\n",dev->name,g_omci_check_state,updown);
+	}
 
-	return -1;
+	if(priv->real_dev != dev)
+		return -1;	
+	
+	switch(g_omci_check_state){
+		case OMCI_CHECK_EVENT_NONE : 
+			ret =-1;
+			if(updown == OMCI_LINK_DOWN_EVENT)//down
+				g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
+			else if(updown == OMCI_LINK_UP_EVENT)
+				g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
+			else
+				ret =0;
+			break; /*non --> one*/
+		case OMCI_CHECK_EVENT_DOWN_DONE:
+			if(updown == OMCI_LINK_UP_EVENT){//up				
+				ret=-1;
+				g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
+			}else if(updown == OMCI_LINK_DOWN_EVENT){
+				ret=0;
+				g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
+			}
+			else
+				ret=0;
+			break;
+		case OMCI_CHECK_EVENT_UP_DONE:
+			ret=0;
+			break;
+		default:
+			ret=-1;
+			printk("omciibc(%s) chk unknow state=%d\n",dev->name,g_omci_check_state);
+			break;
+			
+		
+	}
+	if (priv->debug_tx) {
+		printk("after omciibc(%s) chk state=%d-%d-%d\n",dev->name,g_omci_check_state,updown,ret);
+	}
+	return ret;
 }
 
 int omciibc_handle_frame(struct sk_buff **pskb)
@@ -616,9 +668,9 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 {
 	struct omciibc_priv *priv = netdev_priv(g_omci_dev);
 
-	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d, pass_chk=%d\n", 
+	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d, pass_chk=%d,state_chk=%d\n", 
 		priv->real_dev->name,g_omci_dev->name, (g_omci_dev->flags & IFF_UP)?'+':'-'
-		, priv->debug_tx, priv->debug_rx, priv->pass_chk);
+		, priv->debug_tx, priv->debug_rx, priv->pass_chk,g_omci_check_state);
 	seq_printf(seq, "rx byte:%lu pkt:%lu drop:%lu", 
 		priv->stats.rx_bytes, priv->stats.rx_packets, priv->stats.rx_dropped);
 	
