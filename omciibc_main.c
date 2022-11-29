@@ -801,7 +801,7 @@ module_init(omciibc_init);
 module_exit(omciibc_cleanup);
 
 MODULE_AUTHOR("TREX Software");
-MODULE_LICENSE("GPL");;
+MODULE_LICENSE("Dual BSD/GPL");
 MODULE_DESCRIPTION("omciibc ifnet driver");
 
 
