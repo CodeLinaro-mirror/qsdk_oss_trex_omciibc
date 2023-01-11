@@ -5,7 +5,7 @@
 #define OMCIIBC_DEF_DEV_NAME            "eth4"
 #define OMCIIBC_DEF_VID                 0x888
 #define OMCIIBC_DEF_ETHTYPE             0x88e4
-#define OMCIIBC_DEF_PBIT                0x7 
+#define OMCIIBC_DEF_PBIT                0x7
 #define	OMCIIBC_PROC_NAME_ROOT		"omciibc"
 #define TX_TIMEOUT		        (6*HZ)
 
@@ -16,11 +16,13 @@
 #define VLAN_ETH_ALEN 6
 #endif
 
-static inline char *purename(char *name)
+static inline char *
+purename(char *name)
 {
 	char *s;
-	for (s=name+strlen(name)-1; s>=name; s--)
-		if (*s=='/') return s+1;
+	for (s = name + strlen(name) - 1; s >= name; s--)
+		if (*s == '/')
+			return s + 1;
 	return name;
 }
 
@@ -43,20 +45,19 @@ static inline char *purename(char *name)
 #endif
 
 struct omciibc_priv {
-	struct net_device	*real_dev;
+	struct net_device *real_dev;
 	unsigned int debug_rx:2;
 	unsigned int debug_tx:2;
 	unsigned int pass_chk:2;
 	struct net_device_stats stats;
-	unsigned long last_rx;		// jiffies, replace the one in dev->last_rx
+	unsigned long last_rx;	// jiffies, replace the one in dev->last_rx
 	unsigned long last_rx_bytes;	// last_* used for rate calc in /proc/trex_ifomci
 	unsigned long last_rx_packets;
 	unsigned long last_tx_bytes;
 	unsigned long last_tx_packets;
 };
 
-extern int (*omciibc_nat_recv)(struct sk_buff **pskb);
-extern int (*omciibc_port_state_check)(struct net_device *dev);
+extern int (*omciibc_nat_recv) (struct sk_buff ** pskb);
+extern int (*omciibc_port_state_check) (struct net_device * dev);
 
 #endif
-
