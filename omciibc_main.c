@@ -304,6 +304,13 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_queue_xmit(skb);
 #else
+	if (!netif_carrier_ok(skb->dev)){
+		if (priv->debug_tx)
+			dbprintk("%s: TX DROP no link \n", skb->dev->name);
+		
+		return OMCIIBC_NETDEV_TX_DROP;
+	}
+		
 	{
 		int ret = NETDEV_TX_BUSY;
 		//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=%02x%02x\n", 
@@ -343,7 +350,22 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 
 	if (priv->real_dev != dev)
 		return -1;
-
+#if 1
+	if (netif_carrier_ok(dev)){
+		ret = 0;
+		g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
+	}else{
+		if (updown == OMCI_LINK_UP_EVENT) {	//up                           
+			ret = -1;
+			g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
+		} else if (updown == OMCI_LINK_DOWN_EVENT) {
+			ret = 0;
+			g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
+		} else{
+			ret = 0;
+		}
+	}
+#else
 	switch (g_omci_check_state) {
 	case OMCI_CHECK_EVENT_NONE:
 		ret = -1;
@@ -373,6 +395,7 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 		break;
 
 	}
+#endif	
 	if (priv->debug_tx) {
 		printk("after omciibc(%s) chk state=%d-%d-%d\n", dev->name, g_omci_check_state, updown, ret);
 	}
