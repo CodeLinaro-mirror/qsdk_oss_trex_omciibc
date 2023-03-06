@@ -711,6 +711,16 @@ omciibc_proc_open(struct inode *inode, struct file *file)
 	return single_open(file, omciibc_proc_read, NULL);
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,6,0)
+static struct proc_ops
+ omciibc_proc_fop = {
+	.proc_open = omciibc_proc_open,
+	.proc_write = omciibc_proc_write,
+	.proc_read = seq_read,
+	.proc_lseek = seq_lseek,
+	.proc_release = single_release,
+};
+#else
 static struct file_operations
  omciibc_proc_fop = {
 	.open = omciibc_proc_open,
@@ -719,6 +729,7 @@ static struct file_operations
 	.llseek = seq_lseek,
 	.release = single_release,
 };
+#endif
 
 int
 omciibc_proc_init(void)
