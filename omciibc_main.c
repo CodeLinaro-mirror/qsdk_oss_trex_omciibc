@@ -53,6 +53,9 @@ enum omciibc_link_state_e {
 	OMCI_LINK_NONE_EVENT
 };
 static unsigned int g_omci_check_state = OMCI_CHECK_EVENT_NONE;
+
+int (*omciibc_port_state_check) (struct net_device * dev, int updown) __rcu __read_mostly;
+
 //////////////////////////////////////////////////////////////
 static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
