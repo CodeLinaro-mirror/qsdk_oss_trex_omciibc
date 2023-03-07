@@ -58,6 +58,6 @@ struct omciibc_priv {
 };
 
 extern int (*omciibc_nat_recv) (struct sk_buff ** pskb);
-extern int (*omciibc_port_state_check) (struct net_device * dev);
+extern int (*omciibc_port_state_check) (struct net_device * dev, int updown);
 
 #endif
