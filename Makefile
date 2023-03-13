@@ -21,7 +21,8 @@ all: modules
 
 modules:
 	#make mk_revision
-	make -C $(K_SRC) CROSS_COMPILE=$(TOOLPREFIX) M=$(shell pwd) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" modules
+	make -C $(K_SRC) CROSS_COMPILE=$(TOOLPREFIX) M=$(shell pwd) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" \
+        KBUILD_EXTRA_SYMBOLS="$(STAGING_DIR)/pkginfo/qca-nss-dp.symvers" modules
 	#make -C $(K_SRC) CROSS_COMPILE=$(TOOLPREFIX) SUBDIRS=$(shell pwd) EXTRA_CFLAGS="$(EXTRA_CFLAGS)" modules
 
 install: all
