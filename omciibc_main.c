@@ -416,6 +416,11 @@ omciibc_handle_frame(struct sk_buff **pskb)
 
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 
+	if (priv == NULL) {
+		dbprintk("error priv data for omciibc\r\n");
+		return RX_HANDLER_PASS;
+	}
+	
 	if (skb->dev != priv->real_dev)
 		return RX_HANDLER_PASS;
 
@@ -438,7 +443,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 		if (priv->debug_rx >= 2)
 			print_mem(skb->data, skb->len, skb->len);
 	}
-
+	
 	///is omciibc_ethtype && omciibc_vid
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
 	__vlan_hwaccel_clear_tag(skb);
@@ -446,12 +451,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	skb->vlan_tci = 0;
 #endif
 	skb->dev = g_omci_dev;
-
-	if (priv == NULL) {
-		dbprintk("error priv data for omciibc\r\n");
-		priv->stats.rx_errors++;
-		return RX_HANDLER_PASS;
-	}
+	
 	priv->stats.rx_packets++;
 	priv->stats.rx_bytes += skb->len;
 	if (priv->debug_rx) {
@@ -459,7 +459,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, skb->protocol, vlan_id);
 	}
 
-	return RX_HANDLER_ANOTHER;
+	return RX_HANDLER_PASS;
 }
 
 // misc function used by dev operation function /////////////////////////////////////////////////////////////
