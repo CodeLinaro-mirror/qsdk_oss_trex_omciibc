@@ -57,7 +57,7 @@ struct omciibc_priv {
 	unsigned long last_tx_packets;
 };
 
-extern int (*omciibc_nat_recv) (struct sk_buff ** pskb);
+extern int (*omciibc_net_recv) (struct sk_buff ** pskb);
 extern int (*omciibc_port_state_check) (struct net_device * dev, int updown);
 
 #endif

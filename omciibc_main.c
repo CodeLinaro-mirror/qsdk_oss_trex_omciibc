@@ -412,20 +412,20 @@ omciibc_handle_frame(struct sk_buff **pskb)
 
 	/* Packets from dev_loopback_xmit() do not have L2 header, bail out */
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
-		return RX_HANDLER_PASS;
+		return -1;
 
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 
 	if (priv == NULL) {
 		dbprintk("error priv data for omciibc\r\n");
-		return RX_HANDLER_PASS;
+		return -1;
 	}
 	
 	if (skb->dev != priv->real_dev)
-		return RX_HANDLER_PASS;
+		return -1;
 
 	if (!skb_vlan_tag_present(skb))
-		return RX_HANDLER_PASS;
+		return -1;
 
 	vlan_id = skb_vlan_tag_get_id(skb);
 
@@ -435,7 +435,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	}
 
 	if (ntohs(skb->protocol) != omciibc_ethtype || vlan_id != omciibc_vid)
-		return RX_HANDLER_PASS;
+		return -1;
 
 	if (priv->debug_rx) {
 		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=%02x%02x\n",
@@ -459,7 +459,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, skb->protocol, vlan_id);
 	}
 
-	return RX_HANDLER_PASS;
+	return 0;
 }
 
 // misc function used by dev operation function /////////////////////////////////////////////////////////////
@@ -752,7 +752,7 @@ static void
 omciibc_cleanup(void)
 {
 	struct omciibc_priv *priv;
-	RCU_INIT_POINTER(omciibc_nat_recv, NULL);
+	RCU_INIT_POINTER(omciibc_net_recv, NULL);
 	RCU_INIT_POINTER(omciibc_port_state_check, NULL);
 	omciibc_proc_cleanup();
 #if 0
@@ -819,8 +819,8 @@ omciibc_init(void)
 	if (err)
 		printk("register %s rx handel func err=%d\n", OMCIIBC_IFP_NAME_WAN, err);
 #endif
-	BUG_ON(omciibc_nat_recv);
-	RCU_INIT_POINTER(omciibc_nat_recv, omciibc_handle_frame);
+	BUG_ON(omciibc_net_recv);
+	RCU_INIT_POINTER(omciibc_net_recv, omciibc_handle_frame);
 
 	BUG_ON(omciibc_port_state_check);
 	RCU_INIT_POINTER(omciibc_port_state_check, omciibc_dev_state_check);
