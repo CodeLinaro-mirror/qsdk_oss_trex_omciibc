@@ -59,7 +59,7 @@ static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
 {
 	int i;
-
+	
 	for (i = 0; i < print_len; i++) {
 		char c = (pkt_len == 0 || i < pkt_len) ? ' ' : '-';
 
@@ -356,14 +356,34 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 		ret = 0;
 		g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
 	}else{
-		if (updown == OMCI_LINK_UP_EVENT) {	//up                           
+		switch (g_omci_check_state) {
+		case OMCI_CHECK_EVENT_NONE:
 			ret = -1;
-			g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
-		} else if (updown == OMCI_LINK_DOWN_EVENT) {
+			if (updown == OMCI_LINK_DOWN_EVENT)	//down
+				g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
+			else if (updown == OMCI_LINK_UP_EVENT)
+				g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
+			else
+				ret = 0;
+			break;		/*non --> one */
+		case OMCI_CHECK_EVENT_DOWN_DONE:
+			if (updown == OMCI_LINK_UP_EVENT) {	//up                           
+				ret = -1;
+				g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
+			} else if (updown == OMCI_LINK_DOWN_EVENT) {
+				ret = 0;
+				g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
+			} else
+				ret = 0;
+			break;
+		case OMCI_CHECK_EVENT_UP_DONE:
 			ret = 0;
-			g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
-		} else{
-			ret = 0;
+			break;
+		default:
+			ret = -1;
+			printk("omciibc(%s) chk unknow state=%d\n", dev->name, g_omci_check_state);
+			break;
+
 		}
 	}
 #else
@@ -431,15 +451,15 @@ omciibc_handle_frame(struct sk_buff **pskb)
 
 	if (priv->debug_rx) {
 		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
-			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, skb->protocol, vlan_id);
+			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
 	}
 
 	if (ntohs(skb->protocol) != omciibc_ethtype || vlan_id != omciibc_vid)
 		return -1;
 
 	if (priv->debug_rx) {
-		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=%02x%02x\n",
-			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, skb->protocol, vlan_id);
+		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
 		if (priv->debug_rx >= 2)
 			print_mem(skb->data, skb->len, skb->len);
 	}
@@ -456,7 +476,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	priv->stats.rx_bytes += skb->len;
 	if (priv->debug_rx) {
 		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x%04x\n",
-			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, skb->protocol, vlan_id);
+			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
 	}
 
 	return 0;
