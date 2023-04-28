@@ -308,7 +308,7 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	if (!netif_carrier_ok(skb->dev)){
 		if (priv->debug_tx)
 			dbprintk("%s: TX DROP no link \n", skb->dev->name);
-		
+		priv->stats.tx_dropped++;
 		return OMCIIBC_NETDEV_TX_DROP;
 	}
 		
