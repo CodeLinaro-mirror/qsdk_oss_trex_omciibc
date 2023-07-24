@@ -42,6 +42,11 @@ MODULE_PARM_DESC(omciibc_ethtype, "ethertype for check ibc");
 static struct net_device *g_omci_dev;
 static struct proc_dir_entry *omciibc_pde;
 
+#ifndef OMCIIBC_SWHOOK_ENABLE
+static struct omciibc_info_t __omciibc_info_g;
+struct omciibc_info_t *omciibc_info_g = &__omciibc_info_g;
+#endif
+
 enum omciibc_state_chk_e {
 	OMCI_CHECK_EVENT_NONE = 0,	// node not replied
 	OMCI_CHECK_EVENT_DOWN_DONE,	// node missing
@@ -76,8 +81,138 @@ print_mem(unsigned char *p, int pkt_len, int print_len)
 		printk(KERN_ERR "\n");
 }
 
-#if 0
+static int
+omciibc_handle_frame(struct sk_buff **pskb)
+{
+	struct sk_buff *skb = *pskb;
+	u16 vlan_id = 0;
+	struct omciibc_priv *priv = NULL;
 
+	/* Packets from dev_loopback_xmit() do not have L2 header, bail out */
+	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
+		return -1;
+
+	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
+
+	if (priv == NULL) {
+		dbprintk("error priv data for omciibc\r\n");
+		return -1;
+	}
+
+	if (skb->dev != priv->real_dev) {
+		return -1;
+	}
+
+	if (!skb_vlan_tag_present(skb))
+		return -1;
+
+	vlan_id = skb_vlan_tag_get_id(skb);
+
+	if (priv->debug_rx) {
+		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
+	}
+
+	if (ntohs(skb->protocol) != omciibc_ethtype || vlan_id != omciibc_vid)
+		return -1;
+
+	if (priv->debug_rx) {
+		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
+		if (priv->debug_rx >= 2)
+			print_mem(skb->data, skb->len, skb->len);
+	}
+	///is omciibc_ethtype && omciibc_vid
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
+	__vlan_hwaccel_clear_tag(skb);
+#else
+	skb->vlan_tci = 0;
+#endif
+	skb->dev = g_omci_dev;
+
+	priv->stats.rx_packets++;
+	priv->stats.rx_bytes += skb->len;
+	if (priv->debug_rx) {
+		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
+	}
+
+	return 0;
+}
+
+#ifndef OMCIIBC_SWHOOK_ENABLE
+static int
+omciibc_packet_recv(struct sk_buff *skb, struct net_device *dev, struct packet_type *ptype, struct net_device *orig_dev)
+{
+	return omciibc_handle_frame(&skb);
+}
+
+// omciibc_register_device_and_ethertype
+static int
+omciibc_register_device_and_ethertype(char *omciibc_devname, unsigned short omciibc_ethertype)
+{
+	struct net_device *omciibc_dev = NULL;
+
+	// locate trex_dev
+	if (omciibc_devname == NULL) {
+		dbprintk("module cfg 'omciibc_devname' not specified\n");
+		return -1;
+	}
+
+	if ((omciibc_dev = dev_get_byname(omciibc_devname)) == NULL) {
+		dbprintk("dev %s doesnt exist\n", omciibc_devname);
+		return -1;
+	}
+#if 0
+	if ((omciibc_dev->flags & IFF_UP) == 0) {
+		trex_util_os_dev_put(omciibc_dev);
+		dbprintk("dev %s is not UP\n", omciibc_dev);
+		return -1;
+	}
+#endif
+
+	if (omciibc_info_g->omciibc_dev != NULL) {
+		dev_put(omciibc_info_g->omciibc_dev);
+		omciibc_info_g->omciibc_dev = NULL;
+	}
+
+	if (omciibc_info_g->omciibc_packet_type.func != NULL) {
+		dev_remove_pack(&omciibc_info_g->omciibc_packet_type);
+		omciibc_info_g->omciibc_packet_type.func = NULL;
+	}
+
+	omciibc_info_g->omciibc_dev = omciibc_dev;
+
+	omciibc_info_g->omciibc_packet_type.type = cpu_to_be16(ETH_P_ALL);
+
+	omciibc_info_g->omciibc_packet_type.func = omciibc_packet_recv;
+	omciibc_info_g->omciibc_packet_type.dev = omciibc_dev;
+	dev_add_pack(&omciibc_info_g->omciibc_packet_type);
+
+#if 0
+	dbprintk("\nomciibc register, dev=%s, type=0x%02x\n",
+		 omciibc_info_g->omciibc_dev->name, ntohs(omciibc_info_g->omciibc_packet_type.type));
+#endif
+
+	return 0;
+}
+
+static void
+omciibc_unregister_device_and_ethertype(void)
+{
+	if (omciibc_info_g->omciibc_dev != NULL) {
+		dev_put(omciibc_info_g->omciibc_dev);
+		omciibc_info_g->omciibc_dev = NULL;
+	}
+
+	if (omciibc_info_g->omciibc_packet_type.func != NULL) {
+		dev_remove_pack(&omciibc_info_g->omciibc_packet_type);
+		omciibc_info_g->omciibc_packet_type.func = NULL;
+	}
+}
+#endif
+
+#if 0
 static struct sk_buff *
 omciibc_vlan_tag_add(struct sk_buff *skb, unsigned short tag)
 {
@@ -373,8 +508,9 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 			} else if (updown == OMCI_LINK_DOWN_EVENT) {
 				ret = 0;
 				g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
-			} else
+			} else {
 				ret = 0;
+			}
 			break;
 		case OMCI_CHECK_EVENT_UP_DONE:
 			ret = 0;
@@ -404,8 +540,9 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 		} else if (updown == OMCI_LINK_DOWN_EVENT) {
 			ret = 0;
 			g_omci_check_state = OMCI_CHECK_EVENT_DOWN_DONE;
-		} else
+		} else {
 			ret = 0;
+		}
 		break;
 	case OMCI_CHECK_EVENT_UP_DONE:
 		ret = 0;
@@ -414,72 +551,14 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 		ret = -1;
 		printk("omciibc(%s) chk unknow state=%d\n", dev->name, g_omci_check_state);
 		break;
-
 	}
-#endif	
+#endif
+
 	if (priv->debug_tx) {
 		printk("after omciibc(%s) chk state=%d-%d-%d\n", dev->name, g_omci_check_state, updown, ret);
 	}
+
 	return ret;
-}
-
-int
-omciibc_handle_frame(struct sk_buff **pskb)
-{
-	struct sk_buff *skb = *pskb;
-	u16 vlan_id;
-	struct omciibc_priv *priv = NULL;
-
-	/* Packets from dev_loopback_xmit() do not have L2 header, bail out */
-	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
-		return -1;
-
-	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
-
-	if (priv == NULL) {
-		dbprintk("error priv data for omciibc\r\n");
-		return -1;
-	}
-	
-	if (skb->dev != priv->real_dev)
-		return -1;
-
-	if (!skb_vlan_tag_present(skb))
-		return -1;
-
-	vlan_id = skb_vlan_tag_get_id(skb);
-
-	if (priv->debug_rx) {
-		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
-			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
-	}
-
-	if (ntohs(skb->protocol) != omciibc_ethtype || vlan_id != omciibc_vid)
-		return -1;
-
-	if (priv->debug_rx) {
-		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
-			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
-		if (priv->debug_rx >= 2)
-			print_mem(skb->data, skb->len, skb->len);
-	}
-	
-	///is omciibc_ethtype && omciibc_vid
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5,0,0)
-	__vlan_hwaccel_clear_tag(skb);
-#else
-	skb->vlan_tci = 0;
-#endif
-	skb->dev = g_omci_dev;
-	
-	priv->stats.rx_packets++;
-	priv->stats.rx_bytes += skb->len;
-	if (priv->debug_rx) {
-		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x%04x\n",
-			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
-	}
-
-	return 0;
 }
 
 // misc function used by dev operation function /////////////////////////////////////////////////////////////
@@ -597,7 +676,7 @@ omciibc_probe_one(char *omciibc_name, unsigned char *macaddr)
 	}
 	// assign interface name
 	dev->name[0] = 0;	/* ask system to assign name for this ethernet */
-	strcpy(dev->name, omciibc_name);	// eg: "trex_ifomci%d"
+	strlcpy(dev->name, omciibc_name, IFNAMSIZ - 1);	// eg: "trex_ifomci%d"
 	dev->name[IFNAMSIZ - 1] = 0;
 
 	// assign mac addr
@@ -772,8 +851,14 @@ static void
 omciibc_cleanup(void)
 {
 	struct omciibc_priv *priv;
+
+#ifndef OMCIIBC_SWHOOK_ENABLE
+	omciibc_unregister_device_and_ethertype();
+#else
 	RCU_INIT_POINTER(omciibc_net_recv, NULL);
 	RCU_INIT_POINTER(omciibc_port_state_check, NULL);
+#endif
+
 	omciibc_proc_cleanup();
 #if 0
 	rtnl_lock();
@@ -839,11 +924,17 @@ omciibc_init(void)
 	if (err)
 		printk("register %s rx handel func err=%d\n", OMCIIBC_IFP_NAME_WAN, err);
 #endif
+
+#ifndef OMCIIBC_SWHOOK_ENABLE
+	if (omciibc_register_device_and_ethertype(omciibc_devname, omciibc_ethtype) != 0)
+		return -1;
+#else
 	BUG_ON(omciibc_net_recv);
 	RCU_INIT_POINTER(omciibc_net_recv, omciibc_handle_frame);
 
 	BUG_ON(omciibc_port_state_check);
 	RCU_INIT_POINTER(omciibc_port_state_check, omciibc_dev_state_check);
+#endif
 
 	printk("load %s module\n", OMCIIBC_IFP_NAME_WAN);
 	return 0;

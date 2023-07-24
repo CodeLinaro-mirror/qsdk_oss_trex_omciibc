@@ -57,6 +57,14 @@ struct omciibc_priv {
 	unsigned long last_tx_packets;
 };
 
+#ifndef OMCIIBC_SWHOOK_ENABLE
+struct omciibc_info_t {
+	// tx/rx hook with linux
+	struct net_device *omciibc_dev;	// dev for ibc msg send
+	struct packet_type omciibc_packet_type;	// datastru for dev_add_pack for ibc msg recv
+};
+#endif
+
 extern int (*omciibc_net_recv) (struct sk_buff ** pskb);
 extern int (*omciibc_port_state_check) (struct net_device * dev, int updown);
 
