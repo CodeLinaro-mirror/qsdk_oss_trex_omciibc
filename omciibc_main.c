@@ -64,7 +64,7 @@ static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
 {
 	int i;
-	
+
 	for (i = 0; i < print_len; i++) {
 		char c = (pkt_len == 0 || i < pkt_len) ? ' ' : '-';
 
@@ -89,6 +89,11 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	struct omciibc_priv *priv = NULL;
 
 	/* Packets from dev_loopback_xmit() do not have L2 header, bail out */
+	if (unlikely(skb == NULL)) {
+		dbprintk("skb is NULL!!\r\n");
+		return -1;
+	}
+
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
 		return -1;
 
@@ -144,7 +149,21 @@ omciibc_handle_frame(struct sk_buff **pskb)
 static int
 omciibc_packet_recv(struct sk_buff *skb, struct net_device *dev, struct packet_type *ptype, struct net_device *orig_dev)
 {
-	return omciibc_handle_frame(&skb);
+	// This handle hook was added by dev_all_pack that ptype is all
+	// skb was be checked if skb is 0x88e4 and vid matched.
+	// If yes,skb->dev will be chnaged as omciibc dev,
+	// then go back to __netif_receive_skb_core flow.
+	// otherwise keep original skb.
+	// Finally , if callee is from deliver_skb ,users counter was increased by 1.
+	// So need to do consume here.
+	omciibc_handle_frame(&skb);
+
+	if (skb_shared(skb)) {
+
+		consume_skb(skb);
+	}
+
+	return 0;
 }
 
 // omciibc_register_device_and_ethertype
@@ -170,16 +189,6 @@ omciibc_register_device_and_ethertype(char *omciibc_devname, unsigned short omci
 		return -1;
 	}
 #endif
-
-	if (omciibc_info_g->omciibc_dev != NULL) {
-		dev_put(omciibc_info_g->omciibc_dev);
-		omciibc_info_g->omciibc_dev = NULL;
-	}
-
-	if (omciibc_info_g->omciibc_packet_type.func != NULL) {
-		dev_remove_pack(&omciibc_info_g->omciibc_packet_type);
-		omciibc_info_g->omciibc_packet_type.func = NULL;
-	}
 
 	omciibc_info_g->omciibc_dev = omciibc_dev;
 
@@ -216,7 +225,6 @@ omciibc_unregister_device_and_ethertype(void)
 static struct sk_buff *
 omciibc_vlan_tag_add(struct sk_buff *skb, unsigned short tag)
 {
-
 	struct vlan_ethhdr *veth;
 
 	if (*(unsigned short *)(skb->data + 12) == __constant_htons(ETH_P_8021Q))
@@ -434,19 +442,20 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	skb_len = skb->len;
 	skb->dev = priv->real_dev;
+
 #if 0
 	//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, pack=%04x-%04x\n", 
 	//              skb->dev->name, skb, skb->len, priv->stats.tx_packets, jiffies,  skb->vlan_proto, vlan_tci);
 
 	dev_queue_xmit(skb);
 #else
-	if (!netif_carrier_ok(skb->dev)){
+	if (!netif_carrier_ok(skb->dev)) {
 		if (priv->debug_tx)
 			dbprintk("%s: TX DROP no link \n", skb->dev->name);
 		priv->stats.tx_dropped++;
 		return OMCIIBC_NETDEV_TX_DROP;
 	}
-		
+
 	{
 		int ret = NETDEV_TX_BUSY;
 		//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=%02x%02x\n", 
@@ -473,6 +482,7 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 {
 	struct omciibc_priv *priv = NULL;
 	int ret = 0;
+
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 
 	if (priv->pass_chk)
@@ -486,11 +496,12 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 
 	if (priv->real_dev != dev)
 		return -1;
+
 #if 1
-	if (netif_carrier_ok(dev)){
+	if (netif_carrier_ok(dev)) {
 		ret = 0;
 		g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
-	}else{
+	} else {
 		switch (g_omci_check_state) {
 		case OMCI_CHECK_EVENT_NONE:
 			ret = -1;
@@ -500,9 +511,9 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 				g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
 			else
 				ret = 0;
-			break;		/*non --> one */
+			break;	/*non --> one */
 		case OMCI_CHECK_EVENT_DOWN_DONE:
-			if (updown == OMCI_LINK_UP_EVENT) {	//up                           
+			if (updown == OMCI_LINK_UP_EVENT) {	//up
 				ret = -1;
 				g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
 			} else if (updown == OMCI_LINK_DOWN_EVENT) {
@@ -519,7 +530,6 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 			ret = -1;
 			printk("omciibc(%s) chk unknow state=%d\n", dev->name, g_omci_check_state);
 			break;
-
 		}
 	}
 #else
@@ -534,7 +544,7 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 			ret = 0;
 		break;		/*non --> one */
 	case OMCI_CHECK_EVENT_DOWN_DONE:
-		if (updown == OMCI_LINK_UP_EVENT) {	//up                           
+		if (updown == OMCI_LINK_UP_EVENT) {	//up
 			ret = -1;
 			g_omci_check_state = OMCI_CHECK_EVENT_UP_DONE;
 		} else if (updown == OMCI_LINK_DOWN_EVENT) {
@@ -602,7 +612,6 @@ omciibc_get_stats(struct net_device *dev)
 	struct omciibc_priv *priv = (struct omciibc_priv *)netdev_priv(dev);
 
 	return &priv->stats;
-
 }
 
 static void
@@ -640,7 +649,6 @@ omciibc_tx_timeout(struct net_device *dev)
 		printk("%s: tx timeout! tx_errors=%lu\n", dev->name, priv->stats.tx_errors);
 
 	netif_wake_queue(dev);
-
 }
 
 static int
@@ -860,14 +868,15 @@ omciibc_cleanup(void)
 #endif
 
 	omciibc_proc_cleanup();
+
 #if 0
 	rtnl_lock();
 	if (lowdev != NULL) {
 		netdev_rx_handler_unregister(lowdev);
 	}
 	rtnl_unlock();
-
 #endif
+
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 	dev_put(priv->real_dev);
 	if (g_omci_dev) {
@@ -891,6 +900,7 @@ omciibc_init(void)
 	macaddr_default[2] = 0x95;	// 03 c1 -> omci
 	macaddr_default[3] = 0x74;
 	macaddr_default[5] = 0x04;
+
 	// register trex_ifomci/iftrap interface
 	//get_random_bytes(&macaddr_default[3], 3);     // randomize lower 3 bytes of macaddr
 	g_omci_dev = omciibc_probe_one(OMCIIBC_IFP_NAME_WAN, macaddr_default);
@@ -926,8 +936,16 @@ omciibc_init(void)
 #endif
 
 #ifndef OMCIIBC_SWHOOK_ENABLE
-	if (omciibc_register_device_and_ethertype(omciibc_devname, omciibc_ethtype) != 0)
-		return -1;
+
+	memset(omciibc_info_g, 0x0, sizeof(struct omciibc_info_t));
+	if (omciibc_register_device_and_ethertype(omciibc_devname, omciibc_ethtype) != 0) {
+		printk("omciibc register ethertype pack fail!!!!\n");
+		omciibc_proc_cleanup();
+		dev_put(priv->real_dev);
+		unregister_netdev(g_omci_dev);
+		free_netdev(g_omci_dev);
+		return -ENODEV;
+	}
 #else
 	BUG_ON(omciibc_net_recv);
 	RCU_INIT_POINTER(omciibc_net_recv, omciibc_handle_frame);
@@ -936,9 +954,12 @@ omciibc_init(void)
 	RCU_INIT_POINTER(omciibc_port_state_check, omciibc_dev_state_check);
 #endif
 
+#ifdef OMCIIBC_SWHOOK_ENABLE
 	printk("load %s module\n", OMCIIBC_IFP_NAME_WAN);
+#else
+	printk("load %s module without SWHOOK\n", OMCIIBC_IFP_NAME_WAN);
+#endif
 	return 0;
-
 }
 
 module_init(omciibc_init);
