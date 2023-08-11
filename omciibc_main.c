@@ -156,12 +156,11 @@ omciibc_packet_recv(struct sk_buff *skb, struct net_device *dev, struct packet_t
 	// otherwise keep original skb.
 	// Finally , if callee is from deliver_skb ,users counter was increased by 1.
 	// So need to do consume here.
+
 	omciibc_handle_frame(&skb);
-
-	if (skb_shared(skb)) {
-
-		consume_skb(skb);
-	}
+	// if last one handle , consume_skb will free skb
+	// otherwise consume_skb will decrease skb->users.
+	consume_skb(skb);
 
 	return 0;
 }
@@ -196,6 +195,8 @@ omciibc_register_device_and_ethertype(char *omciibc_devname, unsigned short omci
 
 	omciibc_info_g->omciibc_packet_type.func = omciibc_packet_recv;
 	omciibc_info_g->omciibc_packet_type.dev = omciibc_dev;
+	// turn on ignore_outgoing , ignore tx path for PTYPE_ALL
+	omciibc_info_g->omciibc_packet_type.ignore_outgoing = true;
 	dev_add_pack(&omciibc_info_g->omciibc_packet_type);
 
 #if 0
@@ -808,6 +809,8 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 	seq_printf(seq, "\n");
 
 	seq_printf(seq, "tx byte:%lu pkt:%lu drop:%lu", priv->stats.tx_bytes, priv->stats.tx_packets, priv->stats.tx_dropped);
+	seq_printf(seq, "\n");
+	seq_printf(seq, "omciibc version : V1.3");
 	seq_printf(seq, "\n");
 
 	return 0;
