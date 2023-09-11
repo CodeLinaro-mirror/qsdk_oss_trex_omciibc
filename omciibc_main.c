@@ -63,22 +63,29 @@ static unsigned int g_omci_check_state = OMCI_CHECK_EVENT_NONE;
 static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
 {
+	char line[128];
+	char *s = line;
 	int i;
-
+ 
+	line[0] = 0;
 	for (i = 0; i < print_len; i++) {
 		char c = (pkt_len == 0 || i < pkt_len) ? ' ' : '-';
-
+ 
 		if (i % 16 == 0)
-			printk(KERN_ERR "%04x", i);
-		printk(KERN_ERR "%c%02x", c, *p);
+			s += scnprintf(s, sizeof(line)-(s-line),"%04x", i);
+		s += scnprintf(s, sizeof(line)-(s-line),"%c%02x", c, *p);
 		p++;
 		if (i % 8 == 7)
-			printk(KERN_ERR "%c", c);
-		if (i % 16 == 15)
-			printk(KERN_ERR "\n");
+			s += scnprintf(s,sizeof(line)-(s-line), "%c", c);
+		if (i % 16 == 15) {
+			printk("%s\n", line);
+			line[0] = 0;
+			s = line;
+		}
 	}
 	if (i % 16 != 0)
-		printk(KERN_ERR "\n");
+		printk("%s\n", line);
+
 }
 
 static int
@@ -450,13 +457,7 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_queue_xmit(skb);
 #else
-	if (!netif_carrier_ok(skb->dev)) {
-		if (priv->debug_tx)
-			dbprintk("%s: TX DROP no link \n", skb->dev->name);
-		priv->stats.tx_dropped++;
-		return OMCIIBC_NETDEV_TX_DROP;
-	}
-
+	
 	{
 		int ret = NETDEV_TX_BUSY;
 		//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=%02x%02x\n", 
