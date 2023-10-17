@@ -28,15 +28,15 @@
 #include "omciibc.h"
 
 static char *omciibc_devname = "eth4";
-module_param(omciibc_devname, charp, S_IRUGO);
+module_param(omciibc_devname, charp, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(omciibc_devname, "the device for link real inf");
 
 static unsigned int omciibc_vid = OMCIIBC_DEF_VID;
-module_param(omciibc_vid, uint, S_IRUGO);
+module_param(omciibc_vid, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(omciibc_vid, "vid for check ibc");
 
 static unsigned int omciibc_ethtype = OMCIIBC_DEF_ETHTYPE;
-module_param(omciibc_ethtype, uint, S_IRUGO);
+module_param(omciibc_ethtype, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(omciibc_ethtype, "ethertype for check ibc");
 
 static struct net_device *g_omci_dev;
@@ -811,7 +811,7 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 
 	seq_printf(seq, "tx byte:%lu pkt:%lu drop:%lu", priv->stats.tx_bytes, priv->stats.tx_packets, priv->stats.tx_dropped);
 	seq_printf(seq, "\n");
-	seq_printf(seq, "omciibc version : V1.3");
+	seq_printf(seq, "omciibc version : V1.4");
 	seq_printf(seq, "\n");
 
 	return 0;
