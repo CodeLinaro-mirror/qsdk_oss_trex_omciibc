@@ -365,7 +365,7 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 
 	return ret;
       drop:
-	atomic_long_inc(&dev->tx_dropped);
+	dev->stats.tx_dropped++;
 	kfree_skb_list(skb);
 	return NET_XMIT_DROP;
 }
@@ -412,7 +412,7 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 
 	return ret;
       drop:
-	atomic_long_inc(&dev->tx_dropped);
+	dev->stats.tx_dropped++;
 	kfree_skb_list(skb);
 	return NET_XMIT_DROP;
 }
@@ -690,8 +690,11 @@ omciibc_probe_one(char *omciibc_name, unsigned char *macaddr)
 	dev->name[IFNAMSIZ - 1] = 0;
 
 	// assign mac addr
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)
 	memcpy(dev->dev_addr, macaddr, 6);
-
+#else
+	eth_hw_addr_set(dev, macaddr);
+#endif
 	// set entries in the device structure
 	ether_setup(dev);	// general defaults
 	dev->base_addr = 0;
@@ -922,7 +925,11 @@ omciibc_init(void)
 	}
 
 	dev_put(lowdev);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)	
 	printk("%s dev flag=0x%x\r\n", lowdev->name, lowdev->priv_flags);
+#else
+	printk("%s dev flag=0x%llx\r\n", lowdev->name, lowdev->priv_flags);
+#endif
 	omciibc_proc_init();
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 	priv->real_dev = lowdev;
