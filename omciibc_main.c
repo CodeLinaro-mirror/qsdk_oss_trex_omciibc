@@ -276,7 +276,7 @@ str2argv(char *str, char *argv[], int argv_size)
 	char *p = buff;
 	int i = 0;
 
-	strncpy(buff, str, 1024);
+	strlcpy(buff, str, sizeof(buff));
 	while (p != NULL) {
 		argv[i] = strsep(&p, " \t");
 		if (strlen(argv[i]) > 0) {
@@ -342,6 +342,10 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	}
 
 	skb = validate_xmit_skb_list(skb, dev, &again);
+	if(skb == NULL){
+		dbprintk("XMIT skb is null\n");
+		return NET_XMIT_DROP;
+	}
 	if (skb != orig_skb)
 		goto drop;
 
@@ -392,6 +396,10 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	txq = netdev_pick_tx(dev, skb, NULL);
 
 	skb = validate_xmit_skb_list(skb, dev);
+	if(skb == NULL){
+		dbprintk("XMIT skb is null\n");
+		return NET_XMIT_DROP;
+	}
 	if (skb != orig_skb)
 		goto drop;
 
