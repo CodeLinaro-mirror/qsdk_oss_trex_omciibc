@@ -49,6 +49,7 @@ struct omciibc_priv {
 	unsigned int debug_rx:2;
 	unsigned int debug_tx:2;
 	unsigned int pass_chk:2;
+	unsigned int silent_drop_if_qstop:1;
 	struct net_device_stats stats;
 	unsigned long last_rx;	// jiffies, replace the one in dev->last_rx
 	unsigned long last_rx_bytes;	// last_* used for rate calc in /proc/trex_ifomci
