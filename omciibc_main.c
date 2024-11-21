@@ -72,7 +72,7 @@ enum omciibc_state_chk_e {
 };
 enum omciibc_link_state_e {
 	OMCI_LINK_DOWN_EVENT = 0,	// node not replied
-	OMCI_LINK_UP_EVENT,	// node missing
+	OMCI_LINK_UP_EVENT,		// node missing
 	OMCI_LINK_NONE_EVENT
 };
 static unsigned int g_omci_check_state = OMCI_CHECK_EVENT_NONE;
@@ -346,13 +346,14 @@ omciibc_packet_pick_tx_queue(struct sk_buff * skb)
 }
 
 int
-omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_chk)
+omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_chk, unsigned int silent_drop_if_qstop)
 {
 	struct net_device *dev = skb->dev;
 	struct sk_buff *orig_skb = skb;
 	struct netdev_queue *txq;
 	int ret = NETDEV_TX_BUSY;
 	bool again = false;
+	int is_xmit_frozen = 0;
 
 	if (enable_chk) {
 		if (unlikely(!netif_running(dev) || !netif_carrier_ok(dev)))
@@ -376,6 +377,8 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	HARD_TX_LOCK(dev, txq, smp_processor_id());
 	if (!netif_xmit_frozen_or_drv_stopped(txq)) {
 		ret = netdev_start_xmit(skb, dev, txq, false);
+	} else {
+		is_xmit_frozen = 1;
 	}
 	HARD_TX_UNLOCK(dev, txq);
 	dev_xmit_recursion_dec();
@@ -384,7 +387,10 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 
 	if (!dev_xmit_complete(ret))
 		kfree_skb(skb);
-
+	if (silent_drop_if_qstop) {
+		if (is_xmit_frozen)
+			ret = NET_XMIT_SUCCESS;
+	}
 	return ret;
       drop:
 	dev->stats.tx_dropped++;
@@ -399,12 +405,13 @@ omciibc_packet_pick_tx_queue(struct sk_buff * skb)
 }
 
 int
-omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_chk)
+omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_chk, unsigned int silent_drop_if_qstop)
 {
 	struct net_device *dev = skb->dev;
 	struct sk_buff *orig_skb = skb;
 	struct netdev_queue *txq;
 	int ret = NETDEV_TX_BUSY;
+	int is_xmit_frozen = 0;
 
 	if (enable_chk) {
 		if (unlikely(!netif_running(dev) || !netif_carrier_ok(dev)))
@@ -427,6 +434,8 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	HARD_TX_LOCK(dev, txq, smp_processor_id());
 	if (!netif_xmit_frozen_or_drv_stopped(txq)) {
 		ret = netdev_start_xmit(skb, dev, txq, false);
+	} else {
+		is_xmit_frozen = 1;
 	}
 	HARD_TX_UNLOCK(dev, txq);
 	__this_cpu_dec(xmit_recursion);
@@ -435,7 +444,10 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 
 	if (!dev_xmit_complete(ret))
 		kfree_skb(skb);
-
+	if (silent_drop_if_qstop) {
+		if (is_xmit_frozen)
+			ret = NET_XMIT_SUCCESS;
+	}
 	return ret;
       drop:
 	dev->stats.tx_dropped++;
@@ -483,13 +495,13 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	dev_queue_xmit(skb);
 #else
-	
+
 	{
 		int ret = NETDEV_TX_BUSY;
 		//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=%02x%02x\n", 
 		//      skb->dev->name, skb, skb->len, priv->stats.tx_packets, jiffies, skb->data[0], skb->data[1]);
 		skb_reset_mac_header(skb);
-		if ((ret = omciibc_dev_direct_xmit(skb, omciibc_packet_pick_tx_queue(skb), priv->pass_chk)) != NETDEV_TX_OK) {
+		if ((ret = omciibc_dev_direct_xmit(skb, omciibc_packet_pick_tx_queue(skb), priv->pass_chk, priv->silent_drop_if_qstop)) != NETDEV_TX_OK) {
 			priv->stats.tx_dropped++;
 			return OMCIIBC_NETDEV_TX_DROP;
 		}
@@ -508,18 +520,17 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 int
 omciibc_dev_state_check(struct net_device *dev, int updown)
 {
-	struct omciibc_priv *priv = NULL;
+	struct omciibc_priv *priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 	int ret = 0;
 
-	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 
 	if (priv->pass_chk)
 		return -1;
 
 	if (priv->debug_tx) {
-		printk("omciibc in=%p ,cur=%p, inanme=%s,curname=%s,pass_chk=%d\n", dev, priv->real_dev, dev->name,
-		       priv->real_dev->name, priv->pass_chk);
-		printk("omciibc(%s) chk  state=%d-%d\n", dev->name, g_omci_check_state, updown);
+		printk("omciibc in=%p ,cur=%p, inanme=%s, curname=%s, pass_chk=%d\n", 
+			dev, priv->real_dev, dev->name, priv->real_dev->name, priv->pass_chk);
+		printk("omciibc(%s) chk state=%d-%d\n", dev->name, g_omci_check_state, updown);
 	}
 
 	if (priv->real_dev != dev)
@@ -757,6 +768,7 @@ omciibc_probe_one(char *omciibc_name, unsigned char *macaddr)
 	priv->debug_tx = 0;
 	priv->debug_rx = 0;
 	priv->pass_chk = 0;
+	priv->silent_drop_if_qstop = 1;
 
 	// add interface to linux
 	if (register_netdev(dev)) {
@@ -804,12 +816,20 @@ __omciibc_cmd_process(char *command)
 		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
 		priv->pass_chk = pass_chk;
 		return 1;
+	} else if (argc == 2 && strcmp(argv[0], "silent_drop_if_qstop") == 0) {
+		int value = str2val(argv[1]) & 1;
+		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
+		priv->silent_drop_if_qstop = value;
+		return 1;
 	}
 
 	printk("%s: '%s' cmd error\n", OMCIIBC_PROC_NAME_ROOT, command);
 	printk("syntax:\n"
-	       "debug_tx [0..3] (1:enable, 2:pktdump)\n"
-	       "debug_rx [0..3] (1:enable, 2:pktdump)\n" "pass_chk [0..1] (0:disable, 2:enable)\n" "reset_counter\n");
+	       "reset_counter\n"
+	       "debug_tx [0..3] (0:disable, 1:enable, 2:pktdump)\n"
+	       "debug_rx [0..3] (0:disable, 1:enable, 2:pktdump)\n"
+	       "pass_chk [0|1]  (0:disable, 1:enable)\n"
+	       "silent_drop_if_qstop [0|1]\n");
 	return 0;
 }
 
@@ -831,9 +851,12 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 {
 	struct omciibc_priv *priv = netdev_priv(g_omci_dev);
 
-	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d, pass_chk=%d,state_chk=%d\n",
-		   priv->real_dev->name, g_omci_dev->name, (g_omci_dev->flags & IFF_UP) ? '+' : '-', priv->debug_tx,
-		   priv->debug_rx, priv->pass_chk, g_omci_check_state);
+	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d\n"
+	                "pass_chk=%d, state_chk=%d, silent_drop_if_qstop=%u\n",
+		   priv->real_dev->name, g_omci_dev->name, (g_omci_dev->flags & IFF_UP) ? '+' : '-', 
+		   priv->debug_tx, priv->debug_rx, 
+		   priv->pass_chk, g_omci_check_state,
+		   priv->silent_drop_if_qstop);
 	seq_printf(seq, "rx byte:%lu pkt:%lu drop:%lu", priv->stats.rx_bytes, priv->stats.rx_packets, priv->stats.rx_dropped);
 
 	seq_printf(seq, "\n");
@@ -951,7 +974,7 @@ omciibc_init(void)
 	}
 
 	dev_put(lowdev);
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)	
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5,17,0)
 	printk("%s dev flag=0x%x\r\n", lowdev->name, lowdev->priv_flags);
 #else
 	printk("%s dev flag=0x%llx\r\n", lowdev->name, lowdev->priv_flags);
