@@ -65,6 +65,8 @@ static struct omciibc_info_t __omciibc_info_g;
 struct omciibc_info_t *omciibc_info_g = &__omciibc_info_g;
 #endif
 
+#define OMCIIBC_MACLEN        12
+
 enum omciibc_state_chk_e {
 	OMCI_CHECK_EVENT_NONE = 0,	// node not replied
 	OMCI_CHECK_EVENT_DOWN_DONE,	// node missing
@@ -76,7 +78,7 @@ enum omciibc_link_state_e {
 	OMCI_LINK_NONE_EVENT
 };
 static unsigned int g_omci_check_state = OMCI_CHECK_EVENT_NONE;
-
+static unsigned int g_omciibc_init_ready = 0;
 //////////////////////////////////////////////////////////////
 static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
@@ -120,6 +122,9 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	}
 
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
+		return -1;
+
+	if(!g_omciibc_init_ready)
 		return -1;
 
 	priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
@@ -464,16 +469,37 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	//struct vlan_ethhdr *veth = (struct vlan_ethhdr *)(skb->data);
 	//u16 queue_id = 0;
 	int skb_len;
+	u16 *p16;
 
 	if (skb == NULL)
 		return OMCIIBC_NETDEV_TX_DROP;
+
+	if(!g_omciibc_init_ready){
+		dbprintk("omciibc_init not ready drop\n");
+		dev_kfree_skb_any(skb);
+		priv->stats.tx_dropped++;
+		return OMCIIBC_NETDEV_TX_DROP;
+	}
 
 	if (dev == NULL) {	// should not happen, just in case other module calls hard_xmit directly without proper dev specfied, eg:dgasp module
 		dev_kfree_skb_any(skb);
 		priv->stats.tx_dropped++;
 		return OMCIIBC_NETDEV_TX_DROP;
 	}
-	//check omci packet content, device identifier, "0A", "0B" + message content length.
+
+	//check if omciibc ethtype
+	p16 = skb->data + OMCIIBC_MACLEN;
+
+	if (ntohs(*p16) != omciibc_ethtype ){
+		if (priv->debug_tx)
+			dbprintk("%s: skb %p, len=%d, tx_drop by ethtype err %lu, j=%lu\n",
+				dev->name, skb, skb->len, priv->stats.tx_dropped, jiffies);
+		if (priv->debug_tx >=2)
+	                print_mem(skb->data, skb->len, skb->len);
+		priv->stats.tx_dropped++;
+	        dev_kfree_skb_any(skb);
+	        return OMCIIBC_NETDEV_TX_DROP;
+	}
 
 	vlan_tci = ((u16) omciibc_vid) | (OMCIIBC_DEF_PBIT << VLAN_PRIO_SHIFT);
 
@@ -863,7 +889,7 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 
 	seq_printf(seq, "tx byte:%lu pkt:%lu drop:%lu", priv->stats.tx_bytes, priv->stats.tx_packets, priv->stats.tx_dropped);
 	seq_printf(seq, "\n");
-	seq_printf(seq, "omciibc version : V1.4");
+	seq_printf(seq, "omciibc version : V1.5");
 	seq_printf(seq, "\n");
 
 	return 0;
@@ -1019,6 +1045,7 @@ omciibc_init(void)
 #else
 	printk("load %s module without SWHOOK\n", OMCIIBC_IFP_NAME_WAN);
 #endif
+	g_omciibc_init_ready = 1;
 	return 0;
 }
 
