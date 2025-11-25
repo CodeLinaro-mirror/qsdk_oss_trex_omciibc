@@ -53,6 +53,10 @@ static unsigned int omciibc_vid = OMCIIBC_DEF_VID;
 module_param(omciibc_vid, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(omciibc_vid, "vid for check ibc");
 
+static unsigned int omciibc_pri = OMCIIBC_DEF_PBIT;
+module_param(omciibc_pri, uint, S_IRUGO|S_IWUSR);
+MODULE_PARM_DESC(omciibc_pri, "priority for check ibc");
+
 static unsigned int omciibc_ethtype = OMCIIBC_DEF_ETHTYPE;
 module_param(omciibc_ethtype, uint, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(omciibc_ethtype, "ethertype for check ibc");
@@ -72,13 +76,16 @@ enum omciibc_state_chk_e {
 	OMCI_CHECK_EVENT_DOWN_DONE,	// node missing
 	OMCI_CHECK_EVENT_UP_DONE
 };
+
 enum omciibc_link_state_e {
 	OMCI_LINK_DOWN_EVENT = 0,	// node not replied
 	OMCI_LINK_UP_EVENT,		// node missing
 	OMCI_LINK_NONE_EVENT
 };
+
 static unsigned int g_omci_check_state = OMCI_CHECK_EVENT_NONE;
 static unsigned int g_omciibc_init_ready = 0;
+
 //////////////////////////////////////////////////////////////
 static void
 print_mem(unsigned char *p, int pkt_len, int print_len)
@@ -86,11 +93,11 @@ print_mem(unsigned char *p, int pkt_len, int print_len)
 	char line[128];
 	char *s = line;
 	int i;
- 
+
 	line[0] = 0;
 	for (i = 0; i < print_len; i++) {
 		char c = (pkt_len == 0 || i < pkt_len) ? ' ' : '-';
- 
+
 		if (i % 16 == 0)
 			s += scnprintf(s, sizeof(line)-(s-line),"%04x", i);
 		s += scnprintf(s, sizeof(line)-(s-line),"%c%02x", c, *p);
@@ -144,7 +151,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	vlan_id = skb_vlan_tag_get_id(skb);
 
 	if (priv->debug_rx) {
-		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=0x%04x-0x%04x\n",
 			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
 	}
 
@@ -152,7 +159,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 		return -1;
 
 	if (priv->debug_rx) {
-		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, skbpro=0x%04x-0x%04x\n",
 			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
 		if (priv->debug_rx >= 2)
 			print_mem(skb->data, skb->len, skb->len);
@@ -168,7 +175,7 @@ omciibc_handle_frame(struct sk_buff **pskb)
 	priv->stats.rx_packets++;
 	priv->stats.rx_bytes += skb->len;
 	if (priv->debug_rx) {
-		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=%04x-%04x\n",
+		dbprintk("%s all: skb %p, len=%d, tx %lu, j=%lu, skbpro=0x%04x-0x%04x\n",
 			 skb->dev->name, skb, skb->len, priv->stats.rx_packets, jiffies, ntohs(skb->protocol), vlan_id);
 	}
 
@@ -373,6 +380,14 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	if (skb != orig_skb)
 		goto drop;
 
+	{
+		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
+		uint8_t pri=(uint8_t)((omciibc_pri > OMCIIBC_INTPRI_MAX)? OMCIIBC_INTPRI_MAX : omciibc_pri);
+		skb->int_pri = pri;
+		if (priv->debug_tx)
+			dbprintk("vlan_proto: 0x%x, int_pri=%d, cfg_pri=%d\n", skb->vlan_proto, skb->int_pri, omciibc_pri);
+	}
+
 	skb_set_queue_mapping(skb, queue_id);
 	txq = skb_get_tx_queue(dev, skb);
 
@@ -397,7 +412,8 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 			ret = NET_XMIT_SUCCESS;
 	}
 	return ret;
-      drop:
+
+drop:
 	dev->stats.tx_dropped++;
 	kfree_skb_list(skb);
 	return NET_XMIT_DROP;
@@ -433,6 +449,16 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	if (skb != orig_skb)
 		goto drop;
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
+	{
+		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
+		uint8_t pri=(uint8_t)((omciibc_pri > OMCIIBC_INTPRI_MAX)? OMCIIBC_INTPRI_MAX : omciibc_pri);
+		skb->int_pri = pri;
+		if (priv->debug_tx)
+			dbprintk("vlan_proto: 0x%x, int_pri=%d, cfg_pri=%d\n", skb->vlan_proto, skb->int_pri, omciibc_pri);
+	}
+#endif
+
 	local_bh_disable();
 
 	__this_cpu_inc(xmit_recursion);
@@ -454,7 +480,8 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 			ret = NET_XMIT_SUCCESS;
 	}
 	return ret;
-      drop:
+
+drop:
 	dev->stats.tx_dropped++;
 	kfree_skb_list(skb);
 	return NET_XMIT_DROP;
@@ -465,7 +492,7 @@ int
 omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct omciibc_priv *priv = (struct omciibc_priv *)netdev_priv(dev);
-	u16 vlan_tci = 0;
+	u16 vlan_tci=0, priority=0;
 	//struct vlan_ethhdr *veth = (struct vlan_ethhdr *)(skb->data);
 	//u16 queue_id = 0;
 	int skb_len;
@@ -495,18 +522,19 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 			dbprintk("%s: skb %p, len=%d, tx_drop by ethtype err %lu, j=%lu\n",
 				dev->name, skb, skb->len, priv->stats.tx_dropped, jiffies);
 		if (priv->debug_tx >=2)
-	                print_mem(skb->data, skb->len, skb->len);
+			print_mem(skb->data, skb->len, skb->len);
 		priv->stats.tx_dropped++;
-	        dev_kfree_skb_any(skb);
-	        return OMCIIBC_NETDEV_TX_DROP;
+		dev_kfree_skb_any(skb);
+		return OMCIIBC_NETDEV_TX_DROP;
 	}
 
-	vlan_tci = ((u16) omciibc_vid) | (OMCIIBC_DEF_PBIT << VLAN_PRIO_SHIFT);
+	priority = (omciibc_pri > OMCIIBC_PBIT_MAX) ? OMCIIBC_PBIT_MAX : omciibc_pri;
+	vlan_tci = ((u16) omciibc_vid) | (priority << VLAN_PRIO_SHIFT);
 
 	__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q), vlan_tci);
 
 	if (priv->debug_tx) {
-		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=%04x-%04x\n",
+		dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, xid=0x%04x-0x%04x\n",
 			 dev->name, skb, skb->len, priv->stats.tx_packets, jiffies, skb->vlan_proto, vlan_tci);
 		if (priv->debug_tx >= 2)
 			print_mem(skb->data, skb->len, skb->len);
@@ -516,7 +544,7 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	skb->dev = priv->real_dev;
 
 #if 0
-	//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, pack=%04x-%04x\n", 
+	//dbprintk("%s: skb %p, len=%d, tx %lu, j=%lu, pack=0x%04x-0x%04x\n", 
 	//              skb->dev->name, skb, skb->len, priv->stats.tx_packets, jiffies,  skb->vlan_proto, vlan_tci);
 
 	dev_queue_xmit(skb);
@@ -548,7 +576,6 @@ omciibc_dev_state_check(struct net_device *dev, int updown)
 {
 	struct omciibc_priv *priv = (struct omciibc_priv *)netdev_priv(g_omci_dev);
 	int ret = 0;
-
 
 	if (priv->pass_chk)
 		return -1;
@@ -878,7 +905,7 @@ omciibc_proc_read(struct seq_file *seq, void *v)
 	struct omciibc_priv *priv = netdev_priv(g_omci_dev);
 
 	seq_printf(seq, "%s-%s(%c): debug_tx=%d, debug_rx=%d\n"
-	                "pass_chk=%d, state_chk=%d, silent_drop_if_qstop=%u\n",
+			"pass_chk=%d, state_chk=%d, silent_drop_if_qstop=%u\n",
 		   priv->real_dev->name, g_omci_dev->name, (g_omci_dev->flags & IFF_UP) ? '+' : '-', 
 		   priv->debug_tx, priv->debug_rx, 
 		   priv->pass_chk, g_omci_check_state,

@@ -20,15 +20,19 @@
 #define __OMCIIBC_H__
 
 #define OMCIIBC_IFP_NAME_WAN		"omciibc"
-#define OMCIIBC_DEF_DEV_NAME            "eth4"
-#define OMCIIBC_DEF_VID                 0x888
-#define OMCIIBC_DEF_ETHTYPE             0x88e4
-#define OMCIIBC_DEF_PBIT                0x7
+#define OMCIIBC_DEF_DEV_NAME		"eth4"
+#define OMCIIBC_DEF_VID			0x888
+#define OMCIIBC_DEF_ETHTYPE		0x88e4
+#define OMCIIBC_DEF_PBIT		0x7
 #define	OMCIIBC_PROC_NAME_ROOT		"omciibc"
-#define TX_TIMEOUT		        (6*HZ)
+#define TX_TIMEOUT			(6*HZ)
 
 #define OMCIIBC_NETDEV_TX_OK		0	// skb consumed by callee
 #define OMCIIBC_NETDEV_TX_DROP		1	// skb consumed by callee, but dropped
+
+#define OMCIIBC_PBIT_MAX		7
+#define OMCIIBC_INTPRI_MAX		15
+
 
 #ifndef VLAN_ETH_ALEN
 #define VLAN_ETH_ALEN 6
