@@ -380,12 +380,17 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 	if (skb != orig_skb)
 		goto drop;
 
-	{
+	if (omciibc_pri <= OMCIIBC_INTPRI_MAX) {
 		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
-		uint8_t pri=(uint8_t)((omciibc_pri > OMCIIBC_INTPRI_MAX)? OMCIIBC_INTPRI_MAX : omciibc_pri);
-		skb->int_pri = pri;
-		if (priv->debug_tx)
-			dbprintk("vlan_proto: 0x%x, int_pri=%d, cfg_pri=%d\n", skb->vlan_proto, skb->int_pri, omciibc_pri);
+		skb_set_int_pri(skb, (uint8_t)(omciibc_pri));
+		if (priv->debug_tx) {
+			u16 vlan_tci=0;
+			__vlan_get_tag(skb, &vlan_tci);
+			dbprintk("%s: vlan_tci=0x%x skb->int_pri=%d (cfg_int_pri=%d)\n",
+				  priv->real_dev->name, vlan_tci, skb_get_int_pri(skb), omciibc_pri);
+			if (priv->debug_tx >= 3)
+				print_mem(skb->data, skb->len, skb->len);
+		}
 	}
 
 	skb_set_queue_mapping(skb, queue_id);
@@ -450,12 +455,17 @@ omciibc_dev_direct_xmit(struct sk_buff *skb, u16 queue_id, unsigned int enable_c
 		goto drop;
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
-	{
+	if (omciibc_pri <= OMCIIBC_INTPRI_MAX) {
 		struct omciibc_priv *priv = netdev_priv(g_omci_dev);
-		uint8_t pri=(uint8_t)((omciibc_pri > OMCIIBC_INTPRI_MAX)? OMCIIBC_INTPRI_MAX : omciibc_pri);
-		skb->int_pri = pri;
-		if (priv->debug_tx)
-			dbprintk("vlan_proto: 0x%x, int_pri=%d, cfg_pri=%d\n", skb->vlan_proto, skb->int_pri, omciibc_pri);
+		skb->int_pri = (uint8_t)(omciibc_pri);
+		if (priv->debug_tx) {
+			u16 vlan_tci=0;
+			__vlan_get_tag(skb, &vlan_tci);
+			dbprintk("%s: vlan_tci=0x%x skb->int_pri=%d (cfg_int_pri=%d)\n",
+				  priv->real_dev->name, vlan_tci, skb_get_int_pri(skb), omciibc_pri);
+			if (priv->debug_tx >= 3)
+				print_mem(skb->data, skb->len, skb->len);
+		}
 	}
 #endif
 
@@ -492,7 +502,7 @@ int
 omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct omciibc_priv *priv = (struct omciibc_priv *)netdev_priv(dev);
-	u16 vlan_tci=0, priority=0;
+	u16 vlan_tci=0;
 	//struct vlan_ethhdr *veth = (struct vlan_ethhdr *)(skb->data);
 	//u16 queue_id = 0;
 	int skb_len;
@@ -528,8 +538,7 @@ omciibc_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		return OMCIIBC_NETDEV_TX_DROP;
 	}
 
-	priority = (omciibc_pri > OMCIIBC_PBIT_MAX) ? OMCIIBC_PBIT_MAX : omciibc_pri;
-	vlan_tci = ((u16) omciibc_vid) | (priority << VLAN_PRIO_SHIFT);
+	vlan_tci = ((u16) omciibc_vid) | (OMCIIBC_DEF_PBIT << VLAN_PRIO_SHIFT);
 
 	__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q), vlan_tci);
 
